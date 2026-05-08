@@ -133,11 +133,10 @@ def fetch_detail(item):
 
     print(text[:2000])
 
-if not has_keys(text):
-    print("Skipped out of stock:", item["title"])
-    return None
+    if not has_keys(text):
+        print("Skipped out of stock:", item["title"])
+        return None
 
-    
     title = item["title"]
     image = get_page_image(soup)
 
