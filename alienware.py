@@ -178,7 +178,7 @@ def main():
         print(giveaway["title"], "=>", "EXPIRED" if giveaway["expired"] else "ACTIVE")
 
         # Change this to False if you want expired ones posted too
-        POST_EXPIRED = False
+        POST_EXPIRED = True
 
         if giveaway["expired"] and not POST_EXPIRED:
             continue
