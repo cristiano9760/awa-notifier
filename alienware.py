@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import requests
 from bs4 import BeautifulSoup
 
@@ -9,8 +10,8 @@ PAGE_URL = "https://in.alienwarearena.com/ucf/Giveaway"
 BASE_URL = "https://in.alienwarearena.com"
 SEEN_FILE = "alienware_seen.json"
 
-FOOTER_TEXT = "Subho's AWA Notifier"
-FOOTER_ICON = "https://files.catbox.moe/qttqpy.png"
+FOOTER_TEXT = "Lone's AWA Notifier"
+FOOTER_ICON = "https://i.imgur.com/4M34hi2.png"
 
 
 def load_seen():
@@ -24,6 +25,75 @@ def load_seen():
 def save_seen(seen):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(seen, f, indent=2)
+
+
+def clean_title(title):
+    bad_phrases = [
+        "get your key before they run out",
+        "get your keys before they run out",
+        "learn more",
+        "click here",
+        "read more",
+    ]
+
+    title = re.sub(r"\s+", " ", title).strip()
+
+    for phrase in bad_phrases:
+        title = re.sub(phrase, "", title, flags=re.IGNORECASE)
+
+    title = title.replace("  ", " ").strip(" -|:")
+
+    return title
+
+
+def absolute_url(url):
+    if not url:
+        return None
+
+    if url.startswith("//"):
+        return "https:" + url
+
+    if url.startswith("/"):
+        return BASE_URL + url
+
+    return url
+
+
+def get_best_image(card):
+    img = card.find("img")
+
+    if not img:
+        return None
+
+    image = (
+        img.get("data-src")
+        or img.get("data-original")
+        or img.get("data-lazy")
+        or img.get("src")
+    )
+
+    return absolute_url(image)
+
+
+def is_active_giveaway(card):
+    text = card.get_text(" ", strip=True).lower()
+
+    expired_words = [
+        "expired",
+        "ended",
+        "no keys left",
+        "out of keys",
+        "out of stock",
+        "all keys have been claimed",
+        "this giveaway has ended",
+        "keys are currently unavailable",
+    ]
+
+    for word in expired_words:
+        if word in text:
+            return False
+
+    return True
 
 
 def fetch_giveaways():
@@ -44,22 +114,21 @@ def fetch_giveaways():
         if "/ucf/show/" not in href or "/Giveaway/" not in href:
             continue
 
-        url = href if href.startswith("http") else BASE_URL + href
-        title = link.get_text(" ", strip=True)
+        card = link.find_parent(["div", "article", "li", "section"])
+
+        if not card:
+            card = link.parent
+
+        if not is_active_giveaway(card):
+            continue
+
+        title = clean_title(link.get_text(" ", strip=True))
 
         if not title:
-            title = "Alienware Arena Giveaway"
+            continue
 
-        image = None
-
-        parent = link.find_parent()
-        if parent:
-            img = parent.find("img")
-            if img:
-                image = img.get("src") or img.get("data-src")
-
-        if image and image.startswith("/"):
-            image = BASE_URL + image
+        url = absolute_url(href)
+        image = get_best_image(card)
 
         giveaways.append({
             "title": title,
@@ -82,7 +151,7 @@ def send_discord(giveaway):
     embed = {
         "author": {
             "name": "Alienware Arena - Giveaway",
-            "icon_url": "https://files.catbox.moe/46sipy.png"
+            "icon_url": "https://i.imgur.com/9rZg6Yk.png"
         },
         "title": giveaway["title"],
         "url": giveaway["url"],
@@ -113,7 +182,7 @@ def main():
     new_giveaways = [g for g in giveaways if g["url"] not in seen]
 
     if not new_giveaways:
-        print("No new Alienware Arena giveaways.")
+        print("No new active Alienware giveaways.")
         return
 
     for giveaway in reversed(new_giveaways):
