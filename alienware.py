@@ -129,12 +129,8 @@ def fetch_detail(item):
         print("Skipped out of stock:", item["title"])
         return None
 
-    h1 = soup.find("h1")
-    if h1:
-        title = clean_title(h1.get_text(" ", strip=True))
-    else:
-        title = item["title"]
-
+    
+    title = item["title"]
     image = get_page_image(soup)
 
     return {
