@@ -53,24 +53,12 @@ def clean_title(title):
 
 
 def has_keys(page_text):
-    bad_words = [
-        "all out",
-        "no more keys left",
-        "there are no more keys",
-        "out of keys",
-        "out of stock",
-        "giveaway has ended",
-        "this giveaway has ended",
-        "expired",
-    ]
-
     text = page_text.lower()
 
-    for word in bad_words:
-        if word in text:
-            return False
+    if "get key" in text:
+        return True
 
-    return True
+    return False
 
 
 def get_page_image(soup):
@@ -182,7 +170,7 @@ def main():
     links = get_giveaway_links()
 
     current_urls = [x["url"] for x in links]
-    new_links = [x for x in links if x["url"] not in seen]
+    new_links = links
 
     if not new_links:
         print("No new Alienware giveaways.")
