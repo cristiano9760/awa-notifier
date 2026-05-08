@@ -137,7 +137,17 @@ def send_discord(giveaway):
     if giveaway["image"]:
         embed["image"] = {"url": giveaway["image"]}
 
-    requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=20).raise_for_status()
+    response = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=20)
+
+if response.status_code == 429:
+    retry_after = response.json().get("retry_after", 5)
+    print(f"Rate limited. Waiting {retry_after} seconds...")
+    time.sleep(retry_after)
+    response = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=20)
+
+response.raise_for_status()
+
+time.sleep(2)
 
 
 def main():
