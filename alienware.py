@@ -37,34 +37,11 @@ def absolute_url(url):
 
 def clean_title(title):
     title = re.sub(r"\s+", " ", title).strip()
-
-    remove_parts = [
-        "Get your key before they run out!",
-        "Get your keys before they run out!",
-        "LEARN MORE",
-        "Learn More",
-        "learn more",
-    ]
-
-    for part in remove_parts:
-        title = title.replace(part, "")
-
+    title = title.replace("Get your key before they run out!", "")
+    title = title.replace("Get your keys before they run out!", "")
+    title = title.replace("Learn More", "")
+    title = title.replace("LEARN MORE", "")
     return title.strip(" -|:")
-
-
-def has_keys(page_text):
-    text = page_text.lower()
-
-    if "all out" in text:
-        return False
-
-    if "there are no more keys left in this giveaway" in text:
-        return False
-
-    if "get key" in text:
-        return True
-
-    return False
 
 
 def get_page_image(soup):
@@ -76,23 +53,22 @@ def get_page_image(soup):
     if meta and meta.get("content"):
         return absolute_url(meta["content"])
 
-    imgs = soup.find_all("img")
-
-    for img in imgs:
-        src = img.get("data-src") or img.get("src")
-        src = absolute_url(src)
-
-        if src and "giveaway" in src.lower():
-            return src
-
-    for img in imgs:
-        src = img.get("data-src") or img.get("src")
-        src = absolute_url(src)
-
-        if src and "alienwarearena" in src.lower():
-            return src
-
     return None
+
+
+def is_expired(text):
+    text = text.lower()
+
+    expired_phrases = [
+        "all out",
+        "there are no more keys left in this giveaway",
+        "no more keys left",
+        "out of keys",
+        "giveaway has ended",
+        "expired"
+    ]
+
+    return any(phrase in text for phrase in expired_phrases)
 
 
 def get_giveaway_links():
@@ -110,10 +86,8 @@ def get_giveaway_links():
         title = clean_title(a.get_text(" ", strip=True))
         url = absolute_url(href)
 
-        if not title or not url:
-            continue
-
-        links.append({"title": title, "url": url})
+        if title and url:
+            links.append({"title": title, "url": url})
 
     unique = []
     used = set()
@@ -131,23 +105,20 @@ def fetch_detail(item):
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
 
-    print(text[:2000])
-
-    if not has_keys(text):
-        print("Skipped out of stock:", item["title"])
-        return None
-
-    title = item["title"]
+    expired = is_expired(text)
     image = get_page_image(soup)
 
     return {
-        "title": title,
+        "title": item["title"],
         "url": item["url"],
-        "image": image
+        "image": image,
+        "expired": expired
     }
 
 
 def send_discord(giveaway):
+    status = "Expired / All Out" if giveaway["expired"] else "Active - Keys Available"
+
     embed = {
         "author": {
             "name": "Alienware Arena - Giveaway",
@@ -155,6 +126,7 @@ def send_discord(giveaway):
         },
         "title": giveaway["title"],
         "url": giveaway["url"],
+        "description": f"**Status:** {status}",
         "color": 0x7A35FF,
         "footer": {
             "text": FOOTER_TEXT,
@@ -172,21 +144,34 @@ def main():
     seen = load_seen()
     links = get_giveaway_links()
 
-    current_urls = [x["url"] for x in links]
-    new_links = links
+    print("Found giveaway links:", len(links))
+
+    new_links = [x for x in links if x["url"] not in seen]
+
+    print("New giveaway links:", len(new_links))
 
     if not new_links:
-        print("No new Alienware giveaways.")
+        print("No new giveaways.")
         return
+
+    successfully_handled = []
 
     for item in reversed(new_links):
         giveaway = fetch_detail(item)
 
-        if giveaway:
-            send_discord(giveaway)
-            print("Sent:", giveaway["title"])
+        print(giveaway["title"], "=>", "EXPIRED" if giveaway["expired"] else "ACTIVE")
 
-    save_seen(current_urls)
+        # Change this to False if you want expired ones posted too
+        POST_EXPIRED = True
+
+        if giveaway["expired"] and not POST_EXPIRED:
+            continue
+
+        send_discord(giveaway)
+        successfully_handled.append(giveaway["url"])
+        print("Posted:", giveaway["title"])
+
+    save_seen(seen + successfully_handled)
 
 
 if __name__ == "__main__":
