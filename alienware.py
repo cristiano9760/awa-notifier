@@ -55,6 +55,12 @@ def clean_title(title):
 def has_keys(page_text):
     text = page_text.lower()
 
+    if "all out" in text:
+        return False
+
+    if "there are no more keys left in this giveaway" in text:
+        return False
+
     if "get key" in text:
         return True
 
