@@ -1,4 +1,4 @@
-import os, json, re, requests
+import os, json, re, time, requests
 from bs4 import BeautifulSoup
 
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
