@@ -131,9 +131,11 @@ def fetch_detail(item):
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
 
-    if not has_keys(text):
-        print("Skipped out of stock:", item["title"])
-        return None
+    print(text[:2000])
+
+if not has_keys(text):
+    print("Skipped out of stock:", item["title"])
+    return None
 
     
     title = item["title"]
