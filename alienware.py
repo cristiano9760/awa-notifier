@@ -1,7 +1,4 @@
-import os
-import json
-import re
-import requests
+import os, json, re, requests
 from bs4 import BeautifulSoup
 
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
@@ -13,11 +10,12 @@ SEEN_FILE = "alienware_seen.json"
 FOOTER_TEXT = "Lone's AWA Notifier"
 FOOTER_ICON = "https://i.imgur.com/4M34hi2.png"
 
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+
 
 def load_seen():
     if not os.path.exists(SEEN_FILE):
         return []
-
     with open(SEEN_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -27,124 +25,135 @@ def save_seen(seen):
         json.dump(seen, f, indent=2)
 
 
-def clean_title(title):
-    bad_phrases = [
-        "get your key before they run out",
-        "get your keys before they run out",
-        "learn more",
-        "click here",
-        "read more",
-    ]
-
-    title = re.sub(r"\s+", " ", title).strip()
-
-    for phrase in bad_phrases:
-        title = re.sub(phrase, "", title, flags=re.IGNORECASE)
-
-    title = title.replace("  ", " ").strip(" -|:")
-
-    return title
-
-
 def absolute_url(url):
     if not url:
         return None
-
     if url.startswith("//"):
         return "https:" + url
-
     if url.startswith("/"):
         return BASE_URL + url
-
     return url
 
 
-def get_best_image(card):
-    img = card.find("img")
+def clean_title(title):
+    title = re.sub(r"\s+", " ", title).strip()
 
-    if not img:
-        return None
-
-    image = (
-        img.get("data-src")
-        or img.get("data-original")
-        or img.get("data-lazy")
-        or img.get("src")
-    )
-
-    return absolute_url(image)
-
-
-def is_active_giveaway(card):
-    text = card.get_text(" ", strip=True).lower()
-
-    expired_words = [
-        "expired",
-        "ended",
-        "no keys left",
-        "out of keys",
-        "out of stock",
-        "all keys have been claimed",
-        "this giveaway has ended",
-        "keys are currently unavailable",
+    remove_parts = [
+        "Get your key before they run out!",
+        "Get your keys before they run out!",
+        "LEARN MORE",
+        "Learn More",
+        "learn more",
     ]
 
-    for word in expired_words:
+    for part in remove_parts:
+        title = title.replace(part, "")
+
+    return title.strip(" -|:")
+
+
+def has_keys(page_text):
+    bad_words = [
+        "all out",
+        "no more keys left",
+        "there are no more keys",
+        "out of keys",
+        "out of stock",
+        "giveaway has ended",
+        "this giveaway has ended",
+        "expired",
+    ]
+
+    text = page_text.lower()
+
+    for word in bad_words:
         if word in text:
             return False
 
     return True
 
 
-def fetch_giveaways():
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+def get_page_image(soup):
+    meta = soup.find("meta", property="og:image")
+    if meta and meta.get("content"):
+        return absolute_url(meta["content"])
 
-    response = requests.get(PAGE_URL, headers=headers, timeout=20)
-    response.raise_for_status()
+    meta = soup.find("meta", attrs={"name": "twitter:image"})
+    if meta and meta.get("content"):
+        return absolute_url(meta["content"])
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    imgs = soup.find_all("img")
 
-    giveaways = []
+    for img in imgs:
+        src = img.get("data-src") or img.get("src")
+        src = absolute_url(src)
 
-    for link in soup.find_all("a", href=True):
-        href = link["href"]
+        if src and "giveaway" in src.lower():
+            return src
+
+    for img in imgs:
+        src = img.get("data-src") or img.get("src")
+        src = absolute_url(src)
+
+        if src and "alienwarearena" in src.lower():
+            return src
+
+    return None
+
+
+def get_giveaway_links():
+    html = requests.get(PAGE_URL, headers=HEADERS, timeout=20).text
+    soup = BeautifulSoup(html, "html.parser")
+
+    links = []
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
 
         if "/ucf/show/" not in href or "/Giveaway/" not in href:
             continue
 
-        card = link.find_parent(["div", "article", "li", "section"])
-
-        if not card:
-            card = link.parent
-
-        if not is_active_giveaway(card):
-            continue
-
-        title = clean_title(link.get_text(" ", strip=True))
-
-        if not title:
-            continue
-
+        title = clean_title(a.get_text(" ", strip=True))
         url = absolute_url(href)
-        image = get_best_image(card)
 
-        giveaways.append({
-            "title": title,
-            "url": url,
-            "image": image
-        })
+        if not title or not url:
+            continue
+
+        links.append({"title": title, "url": url})
 
     unique = []
-    used_urls = set()
+    used = set()
 
-    for giveaway in giveaways:
-        if giveaway["url"] not in used_urls:
-            unique.append(giveaway)
-            used_urls.add(giveaway["url"])
+    for item in links:
+        if item["url"] not in used:
+            unique.append(item)
+            used.add(item["url"])
 
     return unique
+
+
+def fetch_detail(item):
+    html = requests.get(item["url"], headers=HEADERS, timeout=20).text
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(" ", strip=True)
+
+    if not has_keys(text):
+        print("Skipped out of stock:", item["title"])
+        return None
+
+    h1 = soup.find("h1")
+    if h1:
+        title = clean_title(h1.get_text(" ", strip=True))
+    else:
+        title = item["title"]
+
+    image = get_page_image(soup)
+
+    return {
+        "title": title,
+        "url": item["url"],
+        "image": image
+    }
 
 
 def send_discord(giveaway):
@@ -162,34 +171,31 @@ def send_discord(giveaway):
         }
     }
 
-    if giveaway.get("image"):
-        embed["image"] = {
-            "url": giveaway["image"]
-        }
+    if giveaway["image"]:
+        embed["image"] = {"url": giveaway["image"]}
 
-    payload = {
-        "embeds": [embed]
-    }
-
-    r = requests.post(WEBHOOK_URL, json=payload, timeout=20)
-    r.raise_for_status()
+    requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=20).raise_for_status()
 
 
 def main():
     seen = load_seen()
-    giveaways = fetch_giveaways()
+    links = get_giveaway_links()
 
-    new_giveaways = [g for g in giveaways if g["url"] not in seen]
+    current_urls = [x["url"] for x in links]
+    new_links = [x for x in links if x["url"] not in seen]
 
-    if not new_giveaways:
-        print("No new active Alienware giveaways.")
+    if not new_links:
+        print("No new Alienware giveaways.")
         return
 
-    for giveaway in reversed(new_giveaways):
-        send_discord(giveaway)
-        print("Sent:", giveaway["title"])
+    for item in reversed(new_links):
+        giveaway = fetch_detail(item)
 
-    save_seen([g["url"] for g in giveaways])
+        if giveaway:
+            send_discord(giveaway)
+            print("Sent:", giveaway["title"])
+
+    save_seen(current_urls)
 
 
 if __name__ == "__main__":
